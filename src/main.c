@@ -1,6 +1,6 @@
 #include "application.h"
 
 int main(int argc, char* argv[]){
-    Run();
+    TinyRT_Run();
     return 0;
 }

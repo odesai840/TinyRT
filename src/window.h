@@ -6,10 +6,10 @@
 
 GLFWwindow* window;
 
-typedef struct WindowProps {
+typedef struct TinyRTWindowProps {
     const char* title;
     int width;
     int height;
-} WindowProps;
+} TinyRTWindowProps;
 
-bool InitWindow(WindowProps* props);
+bool TinyRT_InitWindow(TinyRTWindowProps* props);

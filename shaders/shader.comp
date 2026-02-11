@@ -1,0 +1,189 @@
+#version 460 core
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba32f, binding = 0) uniform image2D accumulation_buffer;
+layout(rgba8, binding = 1) uniform image2D output_image;
+
+struct Triangle {
+    vec3 v0;
+    float pad0;
+    vec3 v1;
+    float pad1;
+    vec3 v2;
+    float pad2;
+    vec3 normal;
+    float pad3;
+    vec3 diffuse;
+    float emission;
+};
+
+layout(std430, binding = 1) readonly buffer TriangleBuffer {
+    Triangle triangles[];
+};
+
+uniform int num_triangles;
+uniform vec3 camera_pos;
+uniform int width;
+uniform int height;
+uniform int samples_this_pass;
+uniform int current_sample;
+uniform int max_depth;
+
+uint rng_state;
+
+uint xorshift32() {
+    rng_state ^= rng_state << 13;
+    rng_state ^= rng_state >> 17;
+    rng_state ^= rng_state << 5;
+    return rng_state;
+}
+
+float random_float() {
+    return float(xorshift32()) / 4294967295.0;
+}
+
+float random_float_range(float min_val, float max_val) {
+    return min_val + (max_val - min_val) * random_float();
+}
+
+vec3 random_in_unit_sphere() {
+    for (int i = 0; i < 100; i++) {
+        vec3 p = vec3(random_float_range(-1.0, 1.0),
+                    random_float_range(-1.0, 1.0),
+                    random_float_range(-1.0, 1.0));
+        if (dot(p, p) < 1.0) return p;
+    }
+    return vec3(0.0, 1.0, 0.0);
+}
+
+vec3 random_hemisphere(vec3 normal) {
+    vec3 in_unit_sphere = random_in_unit_sphere();
+    vec3 direction = normalize(in_unit_sphere);
+    if (dot(direction, normal) > 0.0) {
+        return direction;
+    } else {
+        return -direction;
+    }
+}
+
+bool ray_triangle_intersect(vec3 ray_origin, vec3 ray_dir,
+                            vec3 v0, vec3 v1, vec3 v2,
+                            out float t) {
+    const float EPSILON = 0.0000001;
+    vec3 edge1 = v1 - v0;
+    vec3 edge2 = v2 - v0;
+    vec3 h = cross(ray_dir, edge2);
+    float a = dot(edge1, h);
+
+    if (a > -EPSILON && a < EPSILON) return false;
+
+    float f = 1.0 / a;
+    vec3 s = ray_origin - v0;
+    float u = f * dot(s, h);
+
+    if (u < 0.0 || u > 1.0) return false;
+
+    vec3 q = cross(s, edge1);
+    float v = f * dot(ray_dir, q);
+
+    if (v < 0.0 || u + v > 1.0) return false;
+
+    t = f * dot(edge2, q);
+    return t > EPSILON;
+}
+
+vec3 trace_path(vec3 ray_origin, vec3 ray_dir) {
+    const float EPSILON = 0.001;
+    vec3 color = vec3(0.0);
+    vec3 throughput = vec3(1.0);
+
+    for (int bounce = 0; bounce < max_depth; bounce++) {
+        float closest_t = 1e30;
+        int hit_idx = -1;
+        vec3 hit_normal;
+
+        for (int i = 0; i < num_triangles; i++) {
+            float t;
+            if (ray_triangle_intersect(ray_origin, ray_dir,
+                                    triangles[i].v0,
+                                    triangles[i].v1,
+                                    triangles[i].v2,
+                                    t)) {
+                if (t < closest_t) {
+                    closest_t = t;
+                    hit_idx = i;
+                    hit_normal = triangles[i].normal;
+                }
+            }
+        }
+
+        if (hit_idx == -1) break;
+
+        vec3 hit_point = ray_origin + ray_dir * closest_t;
+        hit_point += hit_normal * EPSILON;
+
+        if (triangles[hit_idx].emission > 0.0) {
+            color += throughput * triangles[hit_idx].diffuse * triangles[hit_idx].emission;
+            break;
+        }
+
+        if (bounce > 3) {
+            float max_component = max(throughput.x, max(throughput.y, throughput.z));
+            if (random_float() > max_component) break;
+            throughput /= max_component;
+        }
+
+        throughput *= triangles[hit_idx].diffuse;
+        vec3 new_direction = random_hemisphere(hit_normal);
+
+        ray_origin = hit_point;
+        ray_dir = new_direction;
+    }
+
+    return color;
+}
+
+vec3 generate_ray_direction(float pixel_x, float pixel_y) {
+    float screen_x = (2.0 * pixel_x / float(width)) - 1.0;
+    float screen_y = 1.0 - (2.0 * pixel_y / float(height));
+
+    float aspect = float(width / height);
+    float fov = 90.0;
+    float scale = tan(radians(fov * 0.5));
+
+    vec3 dir;
+    dir.x = screen_x * aspect * scale;
+    dir.y = screen_y * scale;
+    dir.z = 1.0;
+
+    return normalize(dir);
+}
+
+void main() {
+    ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel_coords.x >= width || pixel_coords.y >= height) return;
+
+    uint seed = uint(pixel_coords.x * 1973 + pixel_coords.y * 9277 + current_sample * 26699) | 1;
+    rng_state = seed;
+
+    vec3 pixel_color = vec3(0.0);
+
+    for (int s = 0; s < samples_this_pass; s++) {
+        float offset_x = float(pixel_coords.x) + random_float() - 0.5;
+        float offset_y = float(pixel_coords.y) + random_float() - 0.5;
+
+        vec3 ray_dir = generate_ray_direction(offset_x, offset_y);
+        vec3 sample_color = trace_path(camera_pos, ray_dir);
+        pixel_color += sample_color;
+    }
+
+    ivec2 flipped_coords = ivec2(pixel_coords.x, height - 1 - pixel_coords.y);
+
+    vec4 accumulated = imageLoad(accumulation_buffer, flipped_coords);
+    accumulated.rgb += pixel_color;
+    accumulated.a = float(current_sample + samples_this_pass);
+    imageStore(accumulation_buffer, flipped_coords, accumulated);
+
+    vec3 final_color = accumulated.rgb / accumulated.a;
+    final_color = sqrt(final_color);
+    imageStore(output_image, flipped_coords, vec4(final_color, 1.0));
+}

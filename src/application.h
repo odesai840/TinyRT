@@ -2,4 +2,4 @@
 
 #include <stdbool.h>
 
-bool Run();
+bool TinyRT_Run(void);
