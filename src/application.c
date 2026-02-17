@@ -9,7 +9,7 @@
 
 bool TinyRT_Run(void) {
     TinyRTWindowProps* props = (TinyRTWindowProps*)malloc(sizeof(TinyRTWindowProps));
-    
+
     if(props == NULL) {
         return false;
     }
@@ -18,12 +18,14 @@ bool TinyRT_Run(void) {
     props->width = 800;
     props->height = 600;
 
-    if(!TinyRT_InitWindow(props)) {
+    GLFWwindow* window = TinyRT_InitWindow(props);
+    if(!window) {
         return false;
     }
     glfwMakeContextCurrent(window);
 
-    if(!TinyRT_InitRenderer(props)) {
+    TinyRTRenderer renderer = {0};
+    if(!TinyRT_InitRenderer(&renderer, props)) {
         return false;
     }
 
@@ -39,8 +41,8 @@ bool TinyRT_Run(void) {
             running = false;
             continue;
         }
-        
-        TinyRT_RenderScene(scene);
+
+        TinyRT_RenderScene(&renderer, scene);
 
         glfwSwapBuffers(window);
     }

@@ -11,20 +11,17 @@
 #define ROWS_PER_BATCH 1
 #define MAX_DEPTH 50
 
-int render_width;
-int render_height;
-
-GLuint render_texture;
-GLuint accumulation_texture;
-GLuint shader;
-GLuint compute_shader;
-GLuint quad_vao, quad_vbo;
-GLuint triangle_ssbo;
-
-int current_sample_count;
-
-static bool rendering_complete = false;
-static bool should_abort_render = false;
+typedef struct TinyRTRenderer {
+    int render_width;
+    int render_height;
+    GLuint render_texture;
+    GLuint accumulation_texture;
+    GLuint shader;
+    GLuint compute_shader;
+    GLuint quad_vao, quad_vbo;
+    GLuint triangle_ssbo;
+    int current_sample_count;
+} TinyRTRenderer;
 
 typedef struct TinyRTGPUTriangle {
     TinyRTVec3 v0;
@@ -39,12 +36,15 @@ typedef struct TinyRTGPUTriangle {
     float emission;
 } TinyRTGPUTriangle;
 
-bool TinyRT_InitRenderer(TinyRTWindowProps* props);
-void TinyRT_ResetRender(void);
+static bool rendering_complete = false;
+static bool should_abort_render = false;
+
+bool TinyRT_InitRenderer(TinyRTRenderer* renderer, TinyRTWindowProps* props);
+void TinyRT_ResetRender(TinyRTRenderer* renderer);
 
 void TinyRT_InitRNG(void);
 
-void TinyRT_RenderScene(Scene* scene);
+void TinyRT_RenderScene(TinyRTRenderer* renderer, Scene* scene);
 TinyRTVec3 TinyRT_TracePath(TinyRTRay ray, Scene* scene);
 bool TinyRT_CheckInShadow(TinyRTVec3 point, TinyRTVec3 light_pos, Scene* scene, float max_dist);
 int TinyRT_GetTotalTriangleCount(Scene* scene);
@@ -56,9 +56,9 @@ GLuint TinyRT_CreateShader(const char* vertex_path, const char* fragment_path);
 GLuint TinyRT_CreateComputeShader(const char* compute_path);
 char* TinyRT_LoadShaderFile(const char* filepath);
 GLuint TinyRT_CompileShader(GLenum type, const char* source);
-void TinyRT_UploadSceneToGPU(Scene* scene);
-void TinyRT_DispatchComputeRender(Scene* scene, int samples_per_pass);
+void TinyRT_UploadSceneToGPU(TinyRTRenderer* renderer, Scene* scene);
+void TinyRT_DispatchComputeRender(TinyRTRenderer* renderer, Scene* scene, int samples_per_pass);
 
-void TinyRT_CreateFullscreenQuad(void);
-void TinyRT_CreateRenderTexture(void);
-void TinyRT_SaveImage(const char* filename);
+void TinyRT_CreateFullscreenQuad(TinyRTRenderer* renderer);
+void TinyRT_CreateRenderTexture(TinyRTRenderer* renderer);
+void TinyRT_SaveImage(TinyRTRenderer* renderer, const char* filename);
